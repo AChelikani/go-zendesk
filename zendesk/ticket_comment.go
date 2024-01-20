@@ -10,8 +10,11 @@ import (
 // TicketCommentAPI is an interface containing all ticket comment related API methods
 type TicketCommentAPI interface {
 	CreateTicketComment(ctx context.Context, ticketID int64, ticketComment TicketComment) (TicketComment, error)
-	ListTicketComments(ctx context.Context, ticketID int64) ([]TicketComment, error)
+	ListTicketComments(ctx context.Context, ticketID int64, opts *ListTicketCommentsOptions) (*ListTicketCommentsResult, error)
 	MakeCommentPrivate(ctx context.Context, ticketID int64, ticketCommentID int64) error
+	GetTicketCommentsIterator(ctx context.Context, opts *PaginationOptions) *Iterator[TicketComment]
+	GetTicketCommentsOBP(ctx context.Context, opts *OBPOptions) ([]TicketComment, Page, error)
+	GetTicketCommentsCBP(ctx context.Context, opts *CBPOptions) ([]TicketComment, CursorPaginationMeta, error)
 }
 
 // TicketComment is a struct for ticket comment payload
@@ -31,13 +34,6 @@ type TicketComment struct {
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 
 	Via *Via `json:"via,omitempty"`
-}
-
-// RedactTicketCommentRequest contains the body of the RedactTicketComment PUT request
-type RedactTicketCommentRequest struct {
-	TicketID               int64    `json:"ticket_id"` // Required
-	HTMLBody               string   `json:"html_body,omitempty"`
-	ExternalAttachmentUrls []string `json:"external_attachment_urls,omitempty"`
 }
 
 // NewPublicTicketComment generates and returns a new TicketComment
@@ -89,25 +85,66 @@ func (z *Client) CreateTicketComment(ctx context.Context, ticketID int64, ticket
 	return result, err
 }
 
+type listTicketCommentsSort string
+
+const (
+	// TicketCommentCreatedAtAsc defines ASC sort val.
+	TicketCommentCreatedAtAsc listTicketCommentsSort = "created_at"
+
+	// TicketCommentCreatedAtDesc defines DESC sort val.
+	TicketCommentCreatedAtDesc listTicketCommentsSort = "-created_at"
+
+	// ListTicketCommentsMaxPageSize contains the max page size.
+	ListTicketCommentsMaxPageSize int = 100
+)
+
+// ListTicketCommentOptions contains all the options supported by ListTicketComments endpoint.
+type ListTicketCommentsOptions struct {
+	CursorPagination
+
+	Include             string                 `url:"include,omitempty"`
+	IncludeInlineImages string                 `url:"include_inline_images,omitempty"`
+	Sort                listTicketCommentsSort `url:"sort,omitempty"`
+}
+
+// ListTicketCommentsResult contains the resulting ticket comments
+// and cursor pagination metadata.
+type ListTicketCommentsResult struct {
+	TicketComments []TicketComment      `json:"comments"`
+	Meta           CursorPaginationMeta `json:"meta"`
+	Users          []User               `json:"users"`
+}
+
 // ListTicketComments gets a list of comment for a specified ticket
 //
 // ref: https://developer.zendesk.com/rest_api/docs/support/ticket_comments#list-comments
-func (z *Client) ListTicketComments(ctx context.Context, ticketID int64) ([]TicketComment, error) {
-	var result struct {
-		TicketComments []TicketComment `json:"comments"`
+func (z *Client) ListTicketComments(
+	ctx context.Context,
+	ticketID int64,
+	opts *ListTicketCommentsOptions,
+) (*ListTicketCommentsResult, error) {
+	url := fmt.Sprintf("/tickets/%d/comments.json", ticketID)
+
+	var err error
+	if opts != nil {
+		url, err = addOptions(url, opts)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	body, err := z.get(ctx, fmt.Sprintf("/tickets/%d/comments.json", ticketID))
+	body, err := z.get(ctx, url)
 	if err != nil {
-		return []TicketComment{}, err
+		return nil, err
 	}
 
+	var result ListTicketCommentsResult
 	err = json.Unmarshal(body, &result)
 	if err != nil {
-		return []TicketComment{}, err
+		return nil, err
 	}
 
-	return result.TicketComments, err
+	return &result, err
 }
 
 // MakeCommentPrivate converts an existing ticket comment to an internal note that is not publicly viewable.
@@ -116,18 +153,5 @@ func (z *Client) ListTicketComments(ctx context.Context, ticketID int64) ([]Tick
 func (z *Client) MakeCommentPrivate(ctx context.Context, ticketID int64, ticketCommentID int64) error {
 	path := fmt.Sprintf("/tickets/%d/comments/%d/make_private", ticketID, ticketCommentID)
 	_, err := z.put(ctx, path, nil)
-	return err
-}
-
-// RedactTicketComment permanently removes words, strings, or attachments from a ticket comment
-//
-// ref: https://developer.zendesk.com/api-reference/ticketing/tickets/ticket_comments/#redact-ticket-comment-in-agent-workspace
-func (z *Client) RedactTicketComment(
-	ctx context.Context,
-	ticketCommentID int64,
-	body RedactTicketCommentRequest,
-) error {
-	path := fmt.Sprintf("/api/v2/comment_redactions/%d.json", ticketCommentID)
-	_, err := z.put(ctx, path, body)
 	return err
 }

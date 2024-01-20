@@ -63,7 +63,7 @@ type Ticket struct {
 	SubmitterID     int64         `json:"submitter_id,omitempty"`
 	AssigneeID      int64         `json:"assignee_id,omitempty"`
 	OrganizationID  int64         `json:"organization_id,omitempty"`
-	GroupID         int64         `json:"group_id,omitempty"`
+	GroupID         json.Number   `json:"group_id,omitempty"`
 	CollaboratorIDs []int64       `json:"collaborator_ids,omitempty"`
 	FollowerIDs     []int64       `json:"follower_ids,omitempty"`
 	EmailCCIDs      []int64       `json:"email_cc_ids,omitempty"`
@@ -129,6 +129,9 @@ type Via struct {
 	} `json:"source"`
 }
 
+// TicketListOptions struct is used to specify options for listing tickets in OBP (Offset Based Pagination).
+// It embeds the PageOptions struct for pagination and provides options for sorting the result;
+// SortBy specifies the field to sort by, and SortOrder specifies the order (either 'asc' or 'desc').
 type TicketListOptions struct {
 	PageOptions
 
@@ -140,9 +143,22 @@ type TicketListOptions struct {
 	SortOrder string `url:"sort_order,omitempty"`
 }
 
+// TicketListCBPResult struct represents the result of a ticket list operation in CBP. It includes an array of Ticket objects, and Meta that holds pagination metadata.
+type TicketListCBPResult struct {
+	Tickets []Ticket             `json:"tickets"`
+	Meta    CursorPaginationMeta `json:"meta"`
+}
+
 // TicketAPI an interface containing all ticket related methods
 type TicketAPI interface {
+	GetTicketsIterator(ctx context.Context, opts *PaginationOptions) *Iterator[Ticket]
 	GetTickets(ctx context.Context, opts *TicketListOptions) ([]Ticket, Page, error)
+	GetTicketsOBP(ctx context.Context, opts *OBPOptions) ([]Ticket, Page, error)
+	GetTicketsCBP(ctx context.Context, opts *CBPOptions) ([]Ticket, CursorPaginationMeta, error)
+	GetOrganizationTickets(ctx context.Context, organizationID int64, ops *TicketListOptions) ([]Ticket, Page, error)
+	GetOrganizationTicketsOBP(ctx context.Context, opts *OBPOptions) ([]Ticket, Page, error)
+	GetOrganizationTicketsCBP(ctx context.Context, opts *CBPOptions) ([]Ticket, CursorPaginationMeta, error)
+	GetOrganizationTicketsIterator(ctx context.Context, opts *PaginationOptions) *Iterator[Ticket]
 	GetTicket(ctx context.Context, id int64) (Ticket, error)
 	GetMultipleTickets(ctx context.Context, ticketIDs []int64) ([]Ticket, error)
 	CreateTicket(ctx context.Context, ticket Ticket) (Ticket, error)
@@ -150,7 +166,7 @@ type TicketAPI interface {
 	DeleteTicket(ctx context.Context, ticketID int64) error
 }
 
-// GetTickets get ticket list
+// GetTickets get ticket list with offset based pagination
 //
 // ref: https://developer.zendesk.com/rest_api/docs/support/tickets#list-tickets
 func (z *Client) GetTickets(ctx context.Context, opts *TicketListOptions) ([]Ticket, Page, error) {
@@ -175,6 +191,36 @@ func (z *Client) GetTickets(ctx context.Context, opts *TicketListOptions) ([]Tic
 	}
 
 	err = json.Unmarshal(body, &data)
+	if err != nil {
+		return nil, Page{}, err
+	}
+	return data.Tickets, data.Page, nil
+}
+
+
+// GetOrganizationTickets get organization ticket list
+//
+// ref: https://developer.zendesk.com/rest_api/docs/support/tickets#list-tickets
+func (z *Client) GetOrganizationTickets(
+	ctx context.Context, organizationID int64, opts *TicketListOptions,
+) ([]Ticket, Page, error) {
+	var data struct {
+		Tickets []Ticket `json:"tickets"`
+		Page
+	}
+
+	tmp := opts
+	if tmp == nil {
+		tmp = &TicketListOptions{}
+	}
+
+	path := fmt.Sprintf("/organizations/%d/tickets.json", organizationID)
+	u, err := addOptions(path, tmp)
+	if err != nil {
+		return nil, Page{}, err
+	}
+
+	err = getData(z, ctx, u, &data)
 	if err != nil {
 		return nil, Page{}, err
 	}

@@ -43,14 +43,26 @@ func TestListTicketComments(t *testing.T) {
 	client := newTestClient(mockAPI)
 	defer mockAPI.Close()
 
-	ticketComments, err := client.ListTicketComments(ctx, 2)
+	result, err := client.ListTicketComments(ctx, 2, nil)
 	if err != nil {
 		t.Fatalf("Failed to list ticket comments: %s", err)
 	}
 
 	expectedLength := 2
-	if len(ticketComments) != expectedLength {
-		t.Fatalf("Returned ticket comments does not have the expected length %d. Ticket comments length is %d", expectedLength, len(ticketComments))
+	if len(result.TicketComments) != expectedLength {
+		t.Fatalf("Returned ticket comments does not have the expected length %d. Ticket comments length is %d", expectedLength, len(result.TicketComments))
+	}
+
+	expectedPaginationMeta := CursorPaginationMeta{
+		HasMore:      true,
+		AfterCursor:  "xxx",
+		BeforeCursor: "yyy",
+	}
+
+	if result.Meta != expectedPaginationMeta {
+		t.Fatalf(`Failed to return correct cursor options.
+Expected: %+v
+Received: %+v`, expectedPaginationMeta, result.Meta)
 	}
 }
 
@@ -98,20 +110,5 @@ func TestMakeCommentPrivate(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestRedactTicketComment(t *testing.T) {
-	mockAPI := newMockAPI(http.MethodPut, "redact_ticket_comment.json")
-	client := newTestClient(mockAPI)
-	defer mockAPI.Close()
-
-	err := client.RedactTicketComment(ctx, 123, RedactTicketCommentRequest{
-		TicketID: 100,
-		HTMLBody: "<div class=\"zd-comment\" dir=\"auto\">My ID number is <redact>847564</redact>!</div>",
-	})
-
-	if err != nil {
-		t.Fatalf("Failed to redact ticket comment: %s", err)
 	}
 }
